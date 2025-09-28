@@ -3,7 +3,7 @@ const sqlite3 = require('sqlite3').verbose();
 const { Telegraf } = require('telegraf');
 
 // Инициализация бота
-const bot = new Telegraf(process.env.TELEGRAM_BOT_TOKEN);
+const bot = new Telegraf(process.env.TELEGRAM_TOKEN);
 
 // Подключение к базе
 const db = new sqlite3.Database('yaryadom.db');
