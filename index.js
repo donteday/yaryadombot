@@ -37,11 +37,65 @@ bot.start(async (ctx) => {
     );
 });
 
+bot.command('status', async (ctx) => {
+    const userId = ctx.from.id;
+    const info = await db.getQuestionInfo(userId);
+    
+    if (!info) {
+      await ctx.reply('❌ Пользователь не найден');
+      return;
+    }
+    
+    let message = '';
+    if (info.premium) {
+      message = `💎 Премиум-доступ активен\n` +
+                `📅 С: ${info.premiumSince}\n` +
+                `📊 Вопросов сегодня: ${info.questionsUsedToday}`;
+    } else {
+      message = `📊 Вопросов сегодня: ${info.questionsUsedToday}/${info.dailyQuestions}\n` +
+                `🎯 Осталось: ${info.questionsLeft}\n\n` +
+                `💡 Используйте /premium для неограниченного доступа`;
+    }
+    
+    await ctx.reply(message);
+  });
+
+async function showPremiumOffer(ctx, limitCheck) {
+    const { used, limit } = limitCheck;
+    
+    await ctx.reply(
+      `🚫 Вы использовали все ${limit} вопросов на сегодня.\n\n` +
+      `💎 Премиум-доступ даст вам:\n` +
+      `• Неограниченное общение\n` +
+      `• Приоритетные ответы\n` +
+      `• Расширенный анализ\n\n` +
+      `Выберите тариф:`,
+      Markup.inlineKeyboard([
+        [Markup.button.callback("💫 Неделя - 149₽", "buy_week")],
+        [Markup.button.callback("✨ Месяц - 399₽", "buy_month")],
+        [Markup.button.callback("💎 Навсегда - 1999₽", "buy_forever")],
+        [Markup.button.callback("🆓 Завтра продолжим", "continue_tomorrow")]
+      ])
+    );
+  }
+
 bot.on("text", async (ctx) => {
     const userId = ctx.from.id;
     const message = ctx.message.text;
     // const user = await getUser(userId);
     try {
+        const limitCheck = await db.useQuestion(userId);
+        console.log(limitCheck);
+        
+        if (!limitCheck.allowed) {
+          if (limitCheck.reason === 'daily_limit_reached') {
+            await showPremiumOffer(ctx, limitCheck);
+            return;
+          }
+          await ctx.reply('❌ Произошла ошибка. Попробуйте позже.');
+          return;
+        }
+
         await ctx.sendChatAction('typing');
         const aiResponse = await generatePsychologyResponse(userId, message);
         const cleanResponse = await parseAndSaveContext(userId, aiResponse);

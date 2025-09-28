@@ -37,7 +37,12 @@ db.serialize(async () => {
       paymentDate DATETIME DEFAULT NULL,
       referral_code TEXT DEFAULT NULL,
       referrals_count INTEGER DEFAULT 0,
-      invited_by TEXT DEFAULT NULL
+      invited_by TEXT DEFAULT NULL,
+      dailyQuestions INTEGER DEFAULT 3,     -- ежедневные вопросы
+      premium BOOLEAN DEFAULT FALSE,         -- премиум статус
+      premiumSince DATETIME DEFAULT NULL,    -- дата начала премиума
+      lastQuestionDate DATE DEFAULT NULL,    -- дата последнего вопроса (для сброса лимита)
+      questionsUsedToday INTEGER DEFAULT 0  -- использовано сегодня
     )
   `);
 
@@ -188,18 +193,18 @@ function addQuestionsAfterPayment(userId, amount) {
 }
 
 // Списать 1 вопрос
-function useQuestion(userId) {
-  return new Promise((resolve, reject) => {
-    db.run(
-      "UPDATE users SET questionsLeft = questionsLeft - 1 WHERE userId = ? AND questionsLeft > 0",
-      [userId],
-      function (err) {
-        if (err) return reject(err);
-        resolve(this.changes > 0);
-      }
-    );
-  });
-}
+// function useQuestion(userId) {
+//   return new Promise((resolve, reject) => {
+//     db.run(
+//       "UPDATE users SET questionsLeft = questionsLeft - 1 WHERE userId = ? AND questionsLeft > 0",
+//       [userId],
+//       function (err) {
+//         if (err) return reject(err);
+//         resolve(this.changes > 0);
+//       }
+//     );
+//   });
+// }
 
 // Получить историю платежей пользователя
 function getPaymentHistory(userId) {
@@ -328,6 +333,102 @@ function getUserByReferralCode(referralCode) {
     });
   }
 
+  // Проверить лимит и использовать вопрос
+  async function useQuestion(userId) {
+    return new Promise((resolve, reject) => {
+      // Исправляем имена полей в SELECT запросе
+      db.get("SELECT dailyQuestions, premium, questionsUsedToday, lastQuestionDate FROM users WHERE userId = ?", [userId], (err, user) => {
+        if (err) return reject(err);
+        if (!user) return resolve({ allowed: false, reason: 'user_not_found' });
+  
+        const today = new Date().toDateString();
+        
+        console.log('📊 User data:', user); // ДОБАВЬТЕ ЭТОТ ЛОГ
+        console.log('📅 Today:', today, 'Last question date:', user.lastQuestionDate);
+  
+        let questionsUsedToday = user.questionsUsedToday; // Исправляем на questionsUsedToday
+        let needsReset = false;
+  
+        // Сброс счетчика если новый день
+        if (user.lastQuestionDate !== today) { // Исправляем на lastQuestionDate
+          console.log('🔄 Resetting counter - new day');
+          questionsUsedToday = 0;
+          needsReset = true;
+        }
+  
+        // Проверка лимита
+        if (!user.premium && questionsUsedToday >= user.dailyQuestions) { // Исправляем на premium и dailyQuestions
+          console.log('🚫 Limit reached:', questionsUsedToday, '/', user.dailyQuestions);
+          return resolve({ 
+            allowed: false, 
+            reason: 'daily_limit_reached', 
+            used: questionsUsedToday, 
+            limit: user.dailyQuestions 
+          });
+        }
+  
+        // Обновляем БД
+        const newCount = questionsUsedToday + 1;
+        const updateQuery = needsReset 
+          ? "UPDATE users SET questionsUsedToday = 1, lastQuestionDate = ? WHERE userId = ?"
+          : "UPDATE users SET questionsUsedToday = questionsUsedToday + 1 WHERE userId = ?";
+        
+        const params = needsReset ? [today, userId] : [userId];
+
+        console.log('💾 Executing:', updateQuery, 'Params:', params);
+  
+        db.run(updateQuery, params, function(err) {
+          if (err) {
+            console.error('❌ Update error:', err);
+            return reject(err);
+          }
+          
+          console.log('✅ Updated successfully. Changes:', this.changes);
+          
+          resolve({ 
+            allowed: true, 
+            used: newCount, 
+            limit: user.dailyQuestions,
+            premium: user.premium 
+          });
+        });
+      });
+    });
+  }
+
+// Получить информацию о лимитах
+async function getQuestionInfo(userId) {
+  return new Promise((resolve, reject) => {
+    db.get("SELECT dailyQuestions, premium, premiumSince, questionsUsedToday, lastQuestionDate FROM users WHERE userId = ?", [userId], (err, user) => {
+      if (err) return reject(err);
+      if (!user) return resolve(null);
+      
+      const today = new Date().toDateString();
+      const isNewDay = user.lastQuestionDate !== today;
+      
+      resolve({
+        dailyQuestions: user.dailyQuestions,
+        premium: user.premium,
+        premiumSince: user.premiumSince,
+        questionsUsedToday: isNewDay ? 0 : user.questionsUsedToday,
+        questionsLeft: isNewDay ? user.dailyQuestions : Math.max(0, user.dailyQuestions - user.questionsUsedToday),
+        isNewDay: isNewDay
+      });
+    });
+  });
+}
+
+// Активировать премиум
+async function activatePremium(userId, days = 30) {
+  return new Promise((resolve, reject) => {
+    const premiumSince = new Date().toISOString();
+    db.run("UPDATE users SET premium = 1, premiumSince = ? WHERE userId = ?", [premiumSince, userId], function(err) {
+      if (err) return reject(err);
+      resolve(this.changes > 0);
+    });
+  });
+}
+
 module.exports = {
   getUser,
   useQuestion,
@@ -343,5 +444,7 @@ module.exports = {
   setInvitedBy,
   getUserByReferralCode,
   getContext,
-  saveContext
+  saveContext,
+  getQuestionInfo,
+  activatePremium
 };

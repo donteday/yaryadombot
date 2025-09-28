@@ -4,7 +4,7 @@ require('dotenv').config();
 const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY;
 
 async function getAIResponse(prompt) {
-console.log(DEEPSEEK_API_KEY);
+    console.log(DEEPSEEK_API_KEY);
 
     try {
         const response = await fetch("https://api.deepseek.com/chat/completions", {
@@ -52,8 +52,10 @@ async function generatePsychologyResponse(userId, message) {
         const previousContext = await db.getContext(userId);
 
         const prompt = `
-  Ты — профессиональный психолог-консультант сервиса "Я рядом!". Твоя задача — поддерживать, мотивировать клиента и давать мудрые советы.
-  
+    Ты — психолог-консультант и наставник сервиса "Я рядом!".  
+    Твоя задача — поддерживать клиента и помогать ему находить силы двигаться дальше.  
+    Отвечай вдохновляюще, но без пафоса: помоги человеку почувствовать, что у него есть внутренние ресурсы справиться.  
+    Можно использовать мягкие метафоры или короткие упражнения для осознания. 
   КОНТЕКСТ ПРЕДЫДУЩИХ СЕАНСОВ:
   ${previousContext || 'Контекст отсутствует'}
   
@@ -61,8 +63,10 @@ async function generatePsychologyResponse(userId, message) {
   ${message}
   
   СОЗДАЙ ОТВЕТ:
-  1. Дай поддерживающий и профессиональный ответ
-  2. В конце добавь ОБНОВЛЕННЫЙ КОНТЕКСТ в формате:
+  1. Дай мотивирующий и воодушевляющий ответ, предложи направление действий (но без давления).
+  2. Используй короткие, понятные абзацы.
+  3. Дай поддерживающий и профессиональный ответ
+  4. В конце добавь ОБНОВЛЕННЫЙ КОНТЕКСТ в формате:
   <!--CONTEXT_START-->
   [обновленный контекст сессии]
   <!--CONTEXT_END-->
