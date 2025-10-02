@@ -73,8 +73,16 @@ async function showPremiumOffer(ctx, limitCheck) {
 bot.on("text", async (ctx) => {
   const userId = ctx.from.id;
   const message = ctx.message.text;
-  // const user = await getUser(userId);
+  
   try {
+  const premiumStatus = await db.checkAndUpdatePremiumStatus(userId);
+
+  if (premiumStatus.ended) {
+    await ctx.reply(
+        `🚫 Ваш премиум период закончился ${premiumStatus.endedDaysAgo}.\n\n` +
+        `💎 Хотите снова получить неограниченное общение? /premium`
+    );
+}
     const limitCheck = await db.useQuestion(userId);
     console.log(limitCheck);
 

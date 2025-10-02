@@ -1,3 +1,5 @@
+const db = require('../db/db');
+
 async function handleStatus(ctx) {
     const userId = ctx.from.id;
       const info = await db.getQuestionInfo(userId);
@@ -6,11 +8,12 @@ async function handleStatus(ctx) {
         await ctx.reply('❌ Пользователь не найден');
         return;
       }
-    
+
+      const userDate = new Date(info.premiumEnds).toLocaleString('ru-RU');
       let message = '';
       if (info.premium) {
         message = `💎 Премиум-доступ активен\n` +
-          `📅 С: ${info.premiumSince}\n` +
+          `📅 Активен до: ${userDate}\n` +
           `📊 Вопросов сегодня: ${info.questionsUsedToday}`;
       } else {
         message = `📊 Вопросов сегодня: ${info.questionsUsedToday}/${info.dailyQuestions}\n` +

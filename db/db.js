@@ -41,6 +41,7 @@ db.serialize(async () => {
       dailyQuestions INTEGER DEFAULT 3,     -- ежедневные вопросы
       premium BOOLEAN DEFAULT FALSE,         -- премиум статус
       premiumSince DATETIME DEFAULT NULL,    -- дата начала премиума
+      premiumEnds DATETIME DEFAULT NULL,
       lastQuestionDate DATE DEFAULT NULL,    -- дата последнего вопроса (для сброса лимита)
       questionsUsedToday INTEGER DEFAULT 0  -- использовано сегодня
     )
@@ -265,9 +266,11 @@ function rewardReferrer(referralCode) {
       if (!row) return resolve(false);
 
       const referrerId = row.userId;
+      const premiumEnds = new Date();
+      premiumEnds.setDate(premiumEnds.getDate() + 3);
       db.run(
-        "UPDATE users SET questionsLeft = questionsLeft + 3, referrals_count = referrals_count + 1 WHERE userId = ?",
-        [referrerId],
+        "UPDATE users SET premium = 1, premiumEnds = ?, referrals_count = referrals_count + 1 WHERE userId = ?",
+        [premiumEnds.toISOString(),referrerId],
         function (err2) {
           if (err2) return reject(err2);
           resolve(referrerId);
@@ -342,23 +345,16 @@ function getUserByReferralCode(referralCode) {
         if (!user) return resolve({ allowed: false, reason: 'user_not_found' });
   
         const today = new Date().toDateString();
-        
-        console.log('📊 User data:', user); // ДОБАВЬТЕ ЭТОТ ЛОГ
-        console.log('📅 Today:', today, 'Last question date:', user.lastQuestionDate);
   
         let questionsUsedToday = user.questionsUsedToday; // Исправляем на questionsUsedToday
         let needsReset = false;
-  
-        // Сброс счетчика если новый день
+
         if (user.lastQuestionDate !== today) { // Исправляем на lastQuestionDate
-          console.log('🔄 Resetting counter - new day');
           questionsUsedToday = 0;
           needsReset = true;
         }
   
-        // Проверка лимита
         if (!user.premium && questionsUsedToday >= user.dailyQuestions) { // Исправляем на premium и dailyQuestions
-          console.log('🚫 Limit reached:', questionsUsedToday, '/', user.dailyQuestions);
           return resolve({ 
             allowed: false, 
             reason: 'daily_limit_reached', 
@@ -366,8 +362,7 @@ function getUserByReferralCode(referralCode) {
             limit: user.dailyQuestions 
           });
         }
-  
-        // Обновляем БД
+
         const newCount = questionsUsedToday + 1;
         const updateQuery = needsReset 
           ? "UPDATE users SET questionsUsedToday = 1, lastQuestionDate = ? WHERE userId = ?"
@@ -383,8 +378,6 @@ function getUserByReferralCode(referralCode) {
             return reject(err);
           }
           
-          console.log('✅ Updated successfully. Changes:', this.changes);
-          
           resolve({ 
             allowed: true, 
             used: newCount, 
@@ -399,7 +392,7 @@ function getUserByReferralCode(referralCode) {
 // Получить информацию о лимитах
 async function getQuestionInfo(userId) {
   return new Promise((resolve, reject) => {
-    db.get("SELECT dailyQuestions, premium, premiumSince, questionsUsedToday, lastQuestionDate FROM users WHERE userId = ?", [userId], (err, user) => {
+    db.get("SELECT dailyQuestions, premium, premiumSince, premiumEnds,questionsUsedToday, lastQuestionDate FROM users WHERE userId = ?", [userId], (err, user) => {
       if (err) return reject(err);
       if (!user) return resolve(null);
       
@@ -410,6 +403,7 @@ async function getQuestionInfo(userId) {
         dailyQuestions: user.dailyQuestions,
         premium: user.premium,
         premiumSince: user.premiumSince,
+        premiumEnds: user.premiumEnds,
         questionsUsedToday: isNewDay ? 0 : user.questionsUsedToday,
         questionsLeft: isNewDay ? user.dailyQuestions : Math.max(0, user.dailyQuestions - user.questionsUsedToday),
         isNewDay: isNewDay
@@ -426,6 +420,50 @@ async function activatePremium(userId, days = 30) {
       if (err) return reject(err);
       resolve(this.changes > 0);
     });
+  });
+}
+
+async function checkAndUpdatePremiumStatus(userId) {
+  return new Promise((resolve, reject) => {
+      db.get("SELECT premium, premiumEnds FROM users WHERE userId = ?", [userId], (err, user) => {
+          if (err) return reject(err);
+          if (!user) return resolve({ active: false, ended: false });
+
+          const now = new Date();
+          let premiumActive = user.premium;
+          let premiumEnded = false;
+          let endedDaysAgo = '';
+
+          // Проверяем если премиум активен но время истекло
+          if (user.premium && user.premium_ends && now > new Date(user.premium_ends)) {
+              // Премиум закончился - обновляем статус
+              db.run(
+                  "UPDATE users SET premium = 0, premiumEnds = NULL, dailyQuestions = 5 WHERE userId = ?",
+                  [userId],
+                  function(err2) {
+                      if (err2) return reject(err2);
+                      
+                      // Вычисляем сколько дней прошло с окончания
+                      const endDate = new Date(user.premium_ends);
+                      const daysAgo = Math.floor((now - endDate) / (1000 * 60 * 60 * 24));
+                      endedDaysAgo = daysAgo === 0 ? 'сегодня' : `${daysAgo} дней назад`;
+                      
+                      resolve({ 
+                          active: false, 
+                          ended: true, 
+                          endedDaysAgo: endedDaysAgo 
+                      });
+                  }
+              );
+          } else {
+              // Премиум активен или не был активен
+              resolve({ 
+                  active: user.premium, 
+                  ended: false,
+                  ends: user.premium_ends 
+              });
+          }
+      });
   });
 }
 
@@ -446,5 +484,6 @@ module.exports = {
   getContext,
   saveContext,
   getQuestionInfo,
-  activatePremium
+  activatePremium,
+  checkAndUpdatePremiumStatus
 };
